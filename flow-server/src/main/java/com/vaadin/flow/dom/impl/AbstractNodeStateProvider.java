@@ -171,8 +171,9 @@ public abstract class AbstractNodeStateProvider
     protected void visitDescendants(Node<?> node, NodeVisitor visitor) {
         node.getChildren().forEach(child -> child.accept(visitor));
 
-        node.getNode().getFeature(VirtualChildrenList.class).iterator()
-                .forEachRemaining(child -> acceptVirtualChild(child, visitor));
+        node.getNode().getFeatureIfInitialized(VirtualChildrenList.class)
+                .ifPresent(list -> list.iterator().forEachRemaining(
+                        child -> acceptVirtualChild(child, visitor)));
     }
 
     private void acceptVirtualChild(StateNode node, NodeVisitor visitor) {

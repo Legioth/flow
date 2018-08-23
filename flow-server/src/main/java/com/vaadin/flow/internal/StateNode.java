@@ -18,7 +18,6 @@ package com.vaadin.flow.internal;
 
 import java.io.Serializable;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -27,6 +26,7 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -187,9 +187,7 @@ public class StateNode implements Serializable {
                 FeatureSet::new);
 
         features = new NodeFeature[featureSet.mappings.size()];
-        featureSet.mappings.forEach((featureType,
-                index) -> features[index.intValue()] = NodeFeatureRegistry
-                        .create(featureType, this));
+        reportableFeatureTypes.forEach(this::getFeature);
     }
 
     private static Map<Class<? extends NodeFeature>, Integer> createMappings(
@@ -307,7 +305,11 @@ public class StateNode implements Serializable {
     }
 
     private void forEachChild(Consumer<StateNode> action) {
-        Arrays.asList(features).forEach(n -> n.forEachChild(action));
+        getInitializedFeatures().forEach(n -> n.forEachChild(action));
+    }
+
+    private Stream<NodeFeature> getInitializedFeatures() {
+        return Stream.of(features).filter(Objects::nonNull);
     }
 
     /**
@@ -334,6 +336,18 @@ public class StateNode implements Serializable {
      * @return a feature instance, not <code>null</code>
      */
     public <T extends NodeFeature> T getFeature(Class<T> featureType) {
+        int featureIndex = getFeatureIndex(featureType);
+
+        NodeFeature feature = features[featureIndex];
+        if (feature == null) {
+            feature = NodeFeatureRegistry.create(featureType, this);
+            features[featureIndex] = feature;
+        }
+
+        return featureType.cast(feature);
+    }
+
+    private <T extends NodeFeature> int getFeatureIndex(Class<T> featureType) {
         assert featureType != null;
 
         Integer featureIndex = featureSet.mappings.get(featureType);
@@ -342,10 +356,14 @@ public class StateNode implements Serializable {
                     "Node does not have the feature " + featureType);
         }
 
-        NodeFeature feature = features[featureIndex.intValue()];
-        assert feature != null;
+        return featureIndex.intValue();
+    }
 
-        return featureType.cast(feature);
+    public <T extends NodeFeature> Optional<T> getFeatureIfInitialized(
+            Class<T> featureType) {
+        int featureIndex = getFeatureIndex(featureType);
+
+        return (Optional<T>) Optional.ofNullable(features[featureIndex]);
     }
 
     /**
@@ -424,7 +442,7 @@ public class StateNode implements Serializable {
 
                 // Make all changes show up as if the node was recently attached
                 clearChanges();
-                Arrays.asList(features)
+                getInitializedFeatures()
                         .forEach(NodeFeature::generateChangesFromEmpty);
             } else {
                 collector.accept(new NodeDetachChange(this));
@@ -447,7 +465,7 @@ public class StateNode implements Serializable {
                 doCollectChanges(collector, getDisalowFeatures());
             }
         } else {
-            doCollectChanges(collector, Stream.of(features));
+            doCollectChanges(collector, getInitializedFeatures());
         }
     }
 
@@ -633,7 +651,7 @@ public class StateNode implements Serializable {
             copy.forEach(Command::execute);
         }
 
-        Arrays.asList(features).forEach(f -> f.onAttach(initialAttach));
+        getInitializedFeatures().forEach(f -> f.onAttach(initialAttach));
     }
 
     private void fireDetachListeners() {
@@ -643,7 +661,7 @@ public class StateNode implements Serializable {
             copy.forEach(Command::execute);
         }
 
-        Arrays.asList(features).forEach(NodeFeature::onDetach);
+        getInitializedFeatures().forEach(NodeFeature::onDetach);
     }
 
     /**
@@ -746,7 +764,8 @@ public class StateNode implements Serializable {
     }
 
     private Stream<NodeFeature> getDisalowFeatures() {
-        return Stream.of(features).filter(feature -> !feature.allowsChanges());
+        return getInitializedFeatures()
+                .filter(feature -> !feature.allowsChanges());
     }
 
     private void setInactive(boolean inactive) {

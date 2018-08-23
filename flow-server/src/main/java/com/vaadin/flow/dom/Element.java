@@ -466,12 +466,14 @@ public class Element extends Node<Element> {
             throw new IllegalArgumentException(ATTRIBUTE_NAME_CANNOT_BE_NULL);
         }
         String lowerCaseAttribute = attribute.toLowerCase(Locale.ENGLISH);
-        if(hasAttribute(lowerCaseAttribute)) {
-            Optional<CustomAttribute> customAttribute = CustomAttribute.get(lowerCaseAttribute);
+        if (hasAttribute(lowerCaseAttribute)) {
+            Optional<CustomAttribute> customAttribute = CustomAttribute
+                    .get(lowerCaseAttribute);
             if (customAttribute.isPresent()) {
                 customAttribute.get().removeAttribute(this);
             } else {
-                getStateProvider().removeAttribute(getNode(), lowerCaseAttribute);
+                getStateProvider().removeAttribute(getNode(),
+                        lowerCaseAttribute);
             }
         }
         return this;
@@ -1338,12 +1340,13 @@ public class Element extends Node<Element> {
                 // This explicit class instantiation is the workaround
                 // which fixes a JVM optimization+serialization bug.
                 // Do not convert to lambda
-                // Detected under  Win7_64 /JDK 1.8.0_152, 1.8.0_172
+                // Detected under Win7_64 /JDK 1.8.0_152, 1.8.0_172
                 // see ElementAttributeMap#deferRegistration
                 new Command() {
                     @Override
                     public void execute() {
-                        attachListener.onAttach(new ElementAttachEvent(Element.this));
+                        attachListener
+                                .onAttach(new ElementAttachEvent(Element.this));
                     }
                 });
     }
@@ -1370,12 +1373,13 @@ public class Element extends Node<Element> {
                 // This explicit class instantiation is the workaround
                 // which fixes a JVM optimization+serialization bug.
                 // Do not convert to lambda
-                // Detected under  Win7_64 /JDK 1.8.0_152, 1.8.0_172
+                // Detected under Win7_64 /JDK 1.8.0_152, 1.8.0_172
                 // see ElementAttributeMap#deferRegistration
                 new Command() {
                     @Override
                     public void execute() {
-                        detachListener.onDetach(new ElementDetachEvent(Element.this));
+                        detachListener
+                                .onDetach(new ElementDetachEvent(Element.this));
                     }
                 });
     }
@@ -1550,18 +1554,21 @@ public class Element extends Node<Element> {
         });
         if (component.getElement().getNode()
                 .hasFeature(VirtualChildrenList.class)) {
-            final Consumer<Component> stateChangeInformer = virtual -> {
-                virtual.onEnabledStateChanged(
-                        enabled ? virtual.getElement().isEnabled() : false);
-
-                informChildrenOfStateChange(enabled, virtual);
-            };
-            final Consumer<StateNode> childNodeConsumer = childNode -> Element
-                    .get(childNode).getComponent()
-                    .ifPresent(stateChangeInformer);
             component.getElement().getNode()
-                    .getFeature(VirtualChildrenList.class)
-                    .forEachChild(childNodeConsumer);
+                    .getFeatureIfInitialized(VirtualChildrenList.class)
+                    .ifPresent(list -> {
+                        final Consumer<Component> stateChangeInformer = virtual -> {
+                            virtual.onEnabledStateChanged(enabled
+                                    ? virtual.getElement().isEnabled() : false);
+
+                            informChildrenOfStateChange(enabled, virtual);
+                        };
+                        final Consumer<StateNode> childNodeConsumer = childNode -> Element
+                                .get(childNode).getComponent()
+                                .ifPresent(stateChangeInformer);
+
+                        list.forEachChild(childNodeConsumer);
+                    });
         }
     }
 

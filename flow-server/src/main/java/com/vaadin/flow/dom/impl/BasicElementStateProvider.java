@@ -326,7 +326,8 @@ public class BasicElementStateProvider extends AbstractNodeStateProvider {
 
     @Override
     public StateNode getShadowRoot(StateNode node) {
-        return node.getFeature(ShadowRootData.class).getShadowRoot();
+        return node.getFeatureIfInitialized(ShadowRootData.class)
+                .map(ShadowRootData::getShadowRoot).orElse(null);
     }
 
     @Override

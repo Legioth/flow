@@ -79,6 +79,12 @@ public class ComponentMapping extends ServerSideFeature {
         return Optional.ofNullable(component);
     }
 
+    public static Optional<Component> getComponent(StateNode node) {
+        assert node.hasFeature(ComponentMapping.class);
+        return node.getFeatureIfInitialized(ComponentMapping.class)
+                .flatMap(ComponentMapping::getComponent);
+    }
+
     @Override
     public void onAttach(boolean initialAttach) {
         getComponent().ifPresent(
