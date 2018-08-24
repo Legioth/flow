@@ -136,6 +136,16 @@ public class StateNode implements Serializable {
         }
     }
 
+    private static class RareFields implements Serializable {
+        private Map<Class<? extends NodeFeature>, Serializable> changes;
+
+        private List<Command> attachListeners;
+
+        private List<Command> detachListeners;
+
+        private ArrayList<StateTree.BeforeClientResponseEntry> beforeClientResponseEntries;
+    }
+
     /**
      * Cache of immutable node feature type set instances.
      */
@@ -148,11 +158,7 @@ public class StateNode implements Serializable {
      */
     private Object features;
 
-    private Map<Class<? extends NodeFeature>, Serializable> changes;
-
-    private List<Command> attachListeners;
-
-    private List<Command> detachListeners;
+    private RareFields rareFields;
 
     private NodeOwner owner = NullOwner.get();
 
@@ -167,7 +173,6 @@ public class StateNode implements Serializable {
 
     private boolean isInitialChanges = true;
 
-    private ArrayList<StateTree.BeforeClientResponseEntry> beforeClientResponseEntries;
     private boolean enabled = true;
 
     /**
@@ -565,16 +570,29 @@ public class StateNode implements Serializable {
             Stream<NodeFeature> features) {
         features.filter(this::hasChangeTracker).forEach(feature -> {
             feature.collectChanges(collector);
-            changes.remove(feature.getClass());
+            if (rareFields != null) {
+                rareFields.changes.remove(feature.getClass());
+            }
         });
         isInitialChanges = false;
-        if (changes != null && changes.isEmpty()) {
-            changes = null;
+        if (rareFields != null && rareFields.changes != null
+                && rareFields.changes.isEmpty()) {
+            clearChanges();
+        }
+    }
+
+    private void potentiallycClearRareFields() {
+        if (rareFields != null && rareFields.attachListeners == null
+                && rareFields.beforeClientResponseEntries == null
+                && rareFields.changes == null
+                && rareFields.detachListeners == null) {
+            rareFields = null;
         }
     }
 
     private boolean hasChangeTracker(NodeFeature nodeFeature) {
-        return changes != null && changes.containsKey(nodeFeature.getClass());
+        return rareFields != null && rareFields.changes != null
+                && rareFields.changes.containsKey(nodeFeature.getClass());
     }
 
     /**
@@ -582,7 +600,10 @@ public class StateNode implements Serializable {
      * testing purposes.
      */
     public void clearChanges() {
-        changes = null;
+        if (rareFields != null) {
+            rareFields.changes = null;
+            potentiallycClearRareFields();
+        }
     }
 
     /**
@@ -689,12 +710,19 @@ public class StateNode implements Serializable {
     public Registration addAttachListener(Command attachListener) {
         assert attachListener != null;
 
-        if (attachListeners == null) {
-            attachListeners = new ArrayList<>(1);
+        ensureRareFields();
+        if (rareFields.attachListeners == null) {
+            rareFields.attachListeners = new ArrayList<>(1);
         }
-        attachListeners.add(attachListener);
+        rareFields.attachListeners.add(attachListener);
 
         return () -> removeAttachListener(attachListener);
+    }
+
+    private void ensureRareFields() {
+        if (rareFields == null) {
+            rareFields = new RareFields();
+        }
     }
 
     /**
@@ -708,10 +736,11 @@ public class StateNode implements Serializable {
     public Registration addDetachListener(Command detachListener) {
         assert detachListener != null;
 
-        if (detachListeners == null) {
-            detachListeners = new ArrayList<>(1);
+        ensureRareFields();
+        if (rareFields.detachListeners == null) {
+            rareFields.detachListeners = new ArrayList<>(1);
         }
-        detachListeners.add(detachListener);
+        rareFields.detachListeners.add(detachListener);
 
         return () -> removeDetachListener(detachListener);
     }
@@ -719,26 +748,36 @@ public class StateNode implements Serializable {
     private void removeAttachListener(Command attachListener) {
         assert attachListener != null;
 
-        attachListeners.remove(attachListener);
+        if (rareFields == null || rareFields.attachListeners == null) {
+            return;
+        }
 
-        if (attachListeners.isEmpty()) {
-            attachListeners = null;
+        rareFields.attachListeners.remove(attachListener);
+
+        if (rareFields.attachListeners.isEmpty()) {
+            rareFields.attachListeners = null;
+            potentiallycClearRareFields();
         }
     }
 
     private void removeDetachListener(Command detachListener) {
         assert detachListener != null;
 
-        detachListeners.remove(detachListener);
+        if (rareFields == null || rareFields.detachListeners == null) {
+            return;
+        }
 
-        if (detachListeners.isEmpty()) {
-            detachListeners = null;
+        rareFields.detachListeners.remove(detachListener);
+
+        if (rareFields.detachListeners.isEmpty()) {
+            rareFields.detachListeners = null;
+            potentiallycClearRareFields();
         }
     }
 
     private void fireAttachListeners(boolean initialAttach) {
-        if (attachListeners != null) {
-            List<Command> copy = new ArrayList<>(attachListeners);
+        if (rareFields != null && rareFields.attachListeners != null) {
+            List<Command> copy = new ArrayList<>(rareFields.attachListeners);
 
             copy.forEach(Command::execute);
         }
@@ -747,8 +786,8 @@ public class StateNode implements Serializable {
     }
 
     private void fireDetachListeners() {
-        if (detachListeners != null) {
-            List<Command> copy = new ArrayList<>(detachListeners);
+        if (rareFields != null && rareFields.detachListeners != null) {
+            List<Command> copy = new ArrayList<>(rareFields.detachListeners);
 
             copy.forEach(Command::execute);
         }
@@ -771,11 +810,12 @@ public class StateNode implements Serializable {
     @SuppressWarnings("unchecked")
     public <T extends Serializable> T getChangeTracker(NodeFeature feature,
             Supplier<T> factory) {
-        if (changes == null) {
-            changes = new HashMap<>();
+        ensureRareFields();
+        if (rareFields.changes == null) {
+            rareFields.changes = new HashMap<>();
         }
 
-        return (T) changes.computeIfAbsent(feature.getClass(),
+        return (T) rareFields.changes.computeIfAbsent(feature.getClass(),
                 k -> factory.get());
     }
 
@@ -924,7 +964,8 @@ public class StateNode implements Serializable {
      *         <code>false</code>
      */
     public boolean hasBeforeClientResponseEntries() {
-        return beforeClientResponseEntries != null;
+        return rareFields != null
+                && rareFields.beforeClientResponseEntries != null;
     }
 
     /**
@@ -938,9 +979,14 @@ public class StateNode implements Serializable {
      *         entries
      */
     public List<StateTree.BeforeClientResponseEntry> dumpBeforeClientResponseEntries() {
-        ArrayList<BeforeClientResponseEntry> entries = beforeClientResponseEntries;
+        if (rareFields == null) {
+            return Collections.emptyList();
+        }
 
-        beforeClientResponseEntries = null;
+        ArrayList<BeforeClientResponseEntry> entries = rareFields.beforeClientResponseEntries;
+
+        rareFields.beforeClientResponseEntries = null;
+        potentiallycClearRareFields();
 
         return !entries.isEmpty() ? entries : Collections.emptyList();
     }
@@ -960,12 +1006,13 @@ public class StateNode implements Serializable {
             BeforeClientResponseEntry entry) {
         assert entry != null;
 
-        if (beforeClientResponseEntries == null) {
-            beforeClientResponseEntries = new ArrayList<>();
+        ensureRareFields();
+        if (rareFields.beforeClientResponseEntries == null) {
+            rareFields.beforeClientResponseEntries = new ArrayList<>();
         }
 
         // Effectively final local variable for the lambda
-        List<BeforeClientResponseEntry> localEntries = beforeClientResponseEntries;
+        List<BeforeClientResponseEntry> localEntries = rareFields.beforeClientResponseEntries;
         localEntries.add(entry);
 
         return () -> localEntries.remove(entry);
