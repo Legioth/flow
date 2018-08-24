@@ -18,8 +18,10 @@ package com.vaadin.flow.internal;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedList;
@@ -42,8 +44,33 @@ import com.vaadin.flow.internal.StateTree.ExecutionRegistration;
 import com.vaadin.flow.internal.change.NodeAttachChange;
 import com.vaadin.flow.internal.change.NodeChange;
 import com.vaadin.flow.internal.change.NodeDetachChange;
+import com.vaadin.flow.internal.nodefeature.AttachExistingElementFeature;
+import com.vaadin.flow.internal.nodefeature.BasicTypeValue;
+import com.vaadin.flow.internal.nodefeature.ClientCallableHandlers;
+import com.vaadin.flow.internal.nodefeature.ComponentMapping;
+import com.vaadin.flow.internal.nodefeature.ElementAttributeMap;
+import com.vaadin.flow.internal.nodefeature.ElementChildrenList;
+import com.vaadin.flow.internal.nodefeature.ElementClassList;
+import com.vaadin.flow.internal.nodefeature.ElementData;
+import com.vaadin.flow.internal.nodefeature.ElementListenerMap;
+import com.vaadin.flow.internal.nodefeature.ElementPropertyMap;
+import com.vaadin.flow.internal.nodefeature.ElementStylePropertyMap;
+import com.vaadin.flow.internal.nodefeature.LoadingIndicatorConfigurationMap;
+import com.vaadin.flow.internal.nodefeature.ModelList;
 import com.vaadin.flow.internal.nodefeature.NodeFeature;
 import com.vaadin.flow.internal.nodefeature.NodeFeatureRegistry;
+import com.vaadin.flow.internal.nodefeature.PollConfigurationMap;
+import com.vaadin.flow.internal.nodefeature.PolymerEventListenerMap;
+import com.vaadin.flow.internal.nodefeature.PolymerServerEventHandlers;
+import com.vaadin.flow.internal.nodefeature.PushConfigurationMap;
+import com.vaadin.flow.internal.nodefeature.PushConfigurationMap.PushConfigurationParametersMap;
+import com.vaadin.flow.internal.nodefeature.ReconnectDialogConfigurationMap;
+import com.vaadin.flow.internal.nodefeature.ShadowRootData;
+import com.vaadin.flow.internal.nodefeature.ShadowRootHost;
+import com.vaadin.flow.internal.nodefeature.SynchronizedPropertiesList;
+import com.vaadin.flow.internal.nodefeature.SynchronizedPropertyEventsList;
+import com.vaadin.flow.internal.nodefeature.TextNodeMap;
+import com.vaadin.flow.internal.nodefeature.VirtualChildrenList;
 import com.vaadin.flow.server.Command;
 import com.vaadin.flow.shared.Registration;
 
@@ -117,9 +144,9 @@ public class StateNode implements Serializable {
     private final FeatureSet featureSet;
 
     /**
-     * Node feature instances for this node.
+     * Node feature instances for this node, or a single item
      */
-    private final NodeFeature[] features;
+    private Object features;
 
     private Map<Class<? extends NodeFeature>, Serializable> changes;
 
@@ -186,15 +213,37 @@ public class StateNode implements Serializable {
                                 Stream.of(nonReportableFeatureTypes))),
                 FeatureSet::new);
 
-        features = new NodeFeature[featureSet.mappings.size()];
+        features = null;
+
         reportableFeatureTypes.forEach(this::getFeature);
     }
+
+    private static List<Class<? extends NodeFeature>> featurePriorityOrder = Arrays
+            .asList(ElementData.class, TextNodeMap.class, BasicTypeValue.class,
+                    ModelList.class, ElementChildrenList.class,
+                    ElementPropertyMap.class, ElementAttributeMap.class,
+                    ElementListenerMap.class, ComponentMapping.class,
+                    ClientCallableHandlers.class, ElementClassList.class,
+                    SynchronizedPropertiesList.class,
+                    SynchronizedPropertyEventsList.class,
+                    ElementStylePropertyMap.class,
+                    PolymerServerEventHandlers.class,
+                    PolymerEventListenerMap.class, ShadowRootData.class,
+                    ShadowRootHost.class, AttachExistingElementFeature.class,
+                    VirtualChildrenList.class, PushConfigurationMap.class,
+                    PushConfigurationParametersMap.class,
+                    PollConfigurationMap.class,
+                    ReconnectDialogConfigurationMap.class,
+                    LoadingIndicatorConfigurationMap.class);
 
     private static Map<Class<? extends NodeFeature>, Integer> createMappings(
             Set<Class<? extends NodeFeature>> featureSet) {
         Map<Class<? extends NodeFeature>, Integer> mappings = new HashMap<>();
-        featureSet.forEach(
-                key -> mappings.put(key, Integer.valueOf(mappings.size())));
+        featureSet.stream()
+                .sorted(Comparator.comparingInt(
+                        feature -> featurePriorityOrder.indexOf(feature)))
+                .forEach(key -> mappings.put(key,
+                        Integer.valueOf(mappings.size())));
         return mappings;
     }
 
@@ -309,7 +358,13 @@ public class StateNode implements Serializable {
     }
 
     private Stream<NodeFeature> getInitializedFeatures() {
-        return Stream.of(features).filter(Objects::nonNull);
+        if (features == null) {
+            return Stream.empty();
+        } else if (features instanceof NodeFeature) {
+            return Stream.of((NodeFeature) features);
+        } else {
+            return Stream.of((NodeFeature[]) features).filter(Objects::nonNull);
+        }
     }
 
     /**
@@ -338,10 +393,30 @@ public class StateNode implements Serializable {
     public <T extends NodeFeature> T getFeature(Class<T> featureType) {
         int featureIndex = getFeatureIndex(featureType);
 
-        NodeFeature feature = features[featureIndex];
-        if (feature == null) {
+        NodeFeature feature;
+        if (featureIndex == 0 && features instanceof NodeFeature) {
+            feature = (NodeFeature) features;
+        } else if (featureIndex == 0 && features == null) {
             feature = NodeFeatureRegistry.create(featureType, this);
-            features[featureIndex] = feature;
+            features = feature;
+        } else {
+            if (features == null) {
+                features = new NodeFeature[0];
+            } else if (features instanceof NodeFeature) {
+                features = new NodeFeature[] { (NodeFeature) features };
+            }
+
+            NodeFeature[] featuresArray = (NodeFeature[]) features;
+            if (featureIndex >= featuresArray.length) {
+                featuresArray = Arrays.copyOf(featuresArray, featureIndex + 1);
+                features = featuresArray;
+            }
+
+            feature = featuresArray[featureIndex];
+            if (feature == null) {
+                feature = NodeFeatureRegistry.create(featureType, this);
+                featuresArray[featureIndex] = feature;
+            }
         }
 
         return featureType.cast(feature);
@@ -361,9 +436,26 @@ public class StateNode implements Serializable {
 
     public <T extends NodeFeature> Optional<T> getFeatureIfInitialized(
             Class<T> featureType) {
+        if (features == null) {
+            return Optional.empty();
+        }
         int featureIndex = getFeatureIndex(featureType);
 
-        return (Optional<T>) Optional.ofNullable(features[featureIndex]);
+        if (features instanceof NodeFeature) {
+            if (featureIndex == 0) {
+                return (Optional<T>) Optional.of((NodeFeature) features);
+            } else {
+                return Optional.empty();
+            }
+        }
+
+        NodeFeature[] featuresArray = (NodeFeature[]) features;
+
+        if (featureIndex >= featuresArray.length) {
+            return Optional.empty();
+        }
+
+        return (Optional<T>) Optional.ofNullable(featuresArray[featureIndex]);
     }
 
     /**
