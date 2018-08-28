@@ -58,7 +58,8 @@ public class ComponentEventBus implements Serializable {
     }
 
     // Package private to enable testing only
-    HashMap<Class<? extends ComponentEvent<?>>, ComponentEventData> componentEventData = new HashMap<>();
+    HashMap<Class<? extends ComponentEvent<?>>, ComponentEventData> componentEventData = new HashMap<>(
+            2);
 
     private Component component;
 
@@ -191,8 +192,8 @@ public class ComponentEventBus implements Serializable {
                 domEventType, event -> handleDomEvent(eventType, event));
         registration.setDisabledUpdateMode(mode);
 
-        LinkedHashMap<String, Class<?>> eventDataExpressions =
-                ComponentEventBusUtil.getEventDataExpressions(eventType);
+        LinkedHashMap<String, Class<?>> eventDataExpressions = ComponentEventBusUtil
+                .getEventDataExpressions(eventType);
         eventDataExpressions.keySet().forEach(registration::addEventData);
 
         if (!"".equals(filter)) {
@@ -231,14 +232,14 @@ public class ComponentEventBus implements Serializable {
             Class<? extends ComponentEvent<?>> eventType) {
         List<Object> eventDataObjects = new ArrayList<>();
 
-        LinkedHashMap<String, Class<?>> expressions =
-                ComponentEventBusUtil.getEventDataExpressions(eventType);
+        LinkedHashMap<String, Class<?>> expressions = ComponentEventBusUtil
+                .getEventDataExpressions(eventType);
         expressions.forEach((expression, type) -> {
             JsonValue jsonValue = domEvent.getEventData().get(expression);
             if (jsonValue == null) {
                 jsonValue = Json.createNull();
             }
-            Object value = JsonCodec.decodeAs(jsonValue,type);
+            Object value = JsonCodec.decodeAs(jsonValue, type);
             eventDataObjects.add(value);
         });
         return eventDataObjects;
